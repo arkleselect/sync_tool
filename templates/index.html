@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tool Action | 跨设备同步</title>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --bg-color: #f4f7f6;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --border-radius: 12px;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            display: grid;
+            gap: 20px;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+            color: #555;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            display: inline-block;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        textarea {
+            width: 100%;
+            height: 150px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            box-sizing: border-box;
+            transition: border 0.3s;
+            outline: none;
+        }
+
+        textarea:focus {
+            border-color: var(--primary-color);
+        }
+
+        .upload-area {
+            border: 2px dashed #cfcfcf;
+            padding: 20px;
+            text-align: center;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+        }
+
+        .upload-area:hover {
+            background-color: #f9f9f9;
+            border-color: var(--primary-color);
+        }
+        
+        input[type="file"] {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .upload-label {
+            pointer-events: none;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .hint-text {
+            margin-top: 8px;
+            font-size: 0.85rem;
+            color: #888;
+            text-align: center;
+        }
+
+        #progressContainer {
+            margin-top: 15px;
+        }
+
+        .progress-item {
+            margin-bottom: 10px;
+            background: #eee;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+            height: 24px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.2s;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 0;
+            left: 10px;
+            line-height: 24px;
+            font-size: 12px;
+            color: #333;
+            font-weight: bold;
+            z-index: 2;
+        }
+
+        #fileList {
+            list-style: none;
+            padding: 0;
+            margin-top: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        #fileList li {
+            padding: 12px 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: center;
+        }
+
+        #fileList li:last-child {
+            border-bottom: none;
+        }
+
+        #fileList a {
+            text-decoration: none;
+            color: #333;
+            flex-grow: 1;
+            display: block;
+        }
+
+        #fileList a:hover {
+            color: var(--primary-color);
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <h3>文本同步</h3>
+        <textarea id="textInput" placeholder="在此输入文本，将自动同步到所有设备...">{{ initial_text }}</textarea>
+    </div>
+
+    <div class="card">
+        <h3>文件传输</h3>
+        
+        <div class="upload-area">
+            <input type="file" id="fileInput" multiple />
+            <div class="upload-label">
+                点击或拖拽文件至此 (支持批量上传)
+            </div>
+        </div>
+        <div class="hint-text">单个文件最大支持 5GB</div>
+
+        <div id="progressContainer"></div>
+
+        <h3>当前文件列表:</h3>
+        <ul id="fileList">
+            {% for filename in initial_files %}
+            <li>
+                <a href="/uploads/{{ filename }}" target="_blank">{{ filename }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    const textarea = document.getElementById("textInput");
+    const fileInput = document.getElementById("fileInput");
+    const fileList = document.getElementById("fileList");
+    const progressContainer = document.getElementById("progressContainer");
+
+    // --- 文本同步 ---
+    textarea.addEventListener("input", () => {
+        socket.emit("send_text", { text: textarea.value });
+    });
+
+    socket.on("update_text", (data) => {
+        if (textarea.value !== data.text) {
+            textarea.value = data.text;
+        }
+    });
+
+    // --- 文件上传 ---
+    fileInput.addEventListener("change", () => {
+        const files = fileInput.files;
+        if (files.length === 0) return;
+
+        Array.from(files).forEach(file => {
+            uploadSingleFile(file);
+        });
+        
+        fileInput.value = ''; 
+    });
+
+    function uploadSingleFile(file) {
+        const progressItem = document.createElement("div");
+        progressItem.className = "progress-item";
+        
+        const progressBar = document.createElement("div");
+        progressBar.className = "progress-bar";
+        
+        const progressText = document.createElement("div");
+        progressText.className = "progress-text";
+        progressText.textContent = `准备上传: ${file.name}`;
+
+        progressItem.appendChild(progressBar);
+        progressItem.appendChild(progressText);
+        progressContainer.prepend(progressItem); 
+
+        const formData = new FormData();
+        formData.append("files", file); 
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/upload", true);
+
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                const percent = (event.loaded / event.total) * 100;
+                progressBar.style.width = percent + "%";
+                progressText.textContent = `上传中 ${file.name}: ${Math.round(percent)}%`;
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status === 200) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    if (data.success) {
+                        progressBar.style.backgroundColor = "#4caf50"; 
+                        progressText.textContent = `上传完成: ${file.name}`;
+                        setTimeout(() => progressItem.remove(), 2000);
+                    } else {
+                        progressText.textContent = `失败: ${data.message}`;
+                        progressBar.style.backgroundColor = "#f44336";
+                    }
+                } catch (e) {
+                    progressText.textContent = `解析错误`;
+                    progressBar.style.backgroundColor = "#f44336";
+                }
+            } else if (xhr.status === 413) {
+                progressText.textContent = `文件过大 (超过50GB)`;
+                progressBar.style.backgroundColor = "#f44336";
+            } else {
+                progressText.textContent = `服务器错误: ${xhr.status}`;
+                progressBar.style.backgroundColor = "#f44336";
+            }
+        };
+
+        xhr.onerror = () => {
+            progressText.textContent = `网络错误`;
+            progressBar.style.backgroundColor = "#f44336";
+        };
+
+        xhr.send(formData);
+    }
+
+    // --- 新文件通知 ---
+    socket.on("new_file", (data) => {
+        addFileToList(data.filename);
+    });
+
+    function addFileToList(filename) {
+        const existingLinks = fileList.querySelectorAll('a');
+        for (let link of existingLinks) {
+            if (link.textContent === filename) return;
+        }
+
+        const li = document.createElement("li");
+        
+        const aView = document.createElement("a");
+        aView.href = `/uploads/${filename}`;
+        aView.textContent = filename;
+        aView.target = "_blank";
+
+        li.appendChild(aView);
+        fileList.insertBefore(li, fileList.firstChild);
+    }
+</script>
+</body>
+</html>

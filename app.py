@@ -110,6 +110,18 @@ def upload_file():
 
     return jsonify({"success": True, "filenames": uploaded_files})
 
+@app.route("/delete/<filename>", methods=["DELETE"])
+def delete_file(filename):
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    if os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+            socketio.emit("file_deleted", {"filename": filename})
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
+    return jsonify({"success": False, "message": "文件不存在"})
+
 @app.route("/uploads/<filename>")
 def download_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)

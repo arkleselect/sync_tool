@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -67,7 +68,7 @@
 
         .upload-area {
             border: 2px dashed #cfcfcf;
-            padding: 20px;
+            padding: 50px;
             text-align: center;
             border-radius: 8px;
             cursor: pointer;
@@ -79,10 +80,13 @@
             background-color: #f9f9f9;
             border-color: var(--primary-color);
         }
-        
+
         input[type="file"] {
             position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             opacity: 0;
             cursor: pointer;
         }
@@ -161,123 +165,238 @@
             color: var(--primary-color);
             text-decoration: underline;
         }
+
+        #fileList li:hover {
+            background-color: #f9f9f9;
+        }
+
+        .button-group {
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            background: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #555;
+        }
+
+        .btn:hover {
+            background: #f0f7ff;
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .btn-danger:hover {
+            background: #fff5f5;
+            border-color: #ff4d4f;
+            color: #ff4d4f;
+        }
+
+        .delete-btn {
+            color: #ff4d4f;
+            cursor: pointer;
+            padding: 5px 10px;
+            font-size: 18px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            margin-left: 10px;
+        }
+
+        .delete-btn:hover {
+            background-color: #fff1f0;
+        }
+
+        /* 拖拽效果 */
+        .upload-area.drag-over {
+            background-color: #f0f7ff;
+            border-color: var(--primary-color);
+            border-style: solid;
+        }
     </style>
 </head>
+
 <body>
 
-<div class="container">
-    <div class="card">
-        <h3>文本同步</h3>
-        <textarea id="textInput" placeholder="在此输入文本，将自动同步到所有设备...">{{ initial_text }}</textarea>
-    </div>
-
-    <div class="card">
-        <h3>文件传输</h3>
-        
-        <div class="upload-area">
-            <input type="file" id="fileInput" multiple />
-            <div class="upload-label">
-                点击或拖拽文件至此 (支持批量上传)
+    <div class="container">
+        <div class="card">
+            <h3>文本同步</h3>
+            <textarea id="textInput" placeholder="在此输入文本，将自动同步到所有设备...">{{ initial_text }}</textarea>
+            <div class="button-group">
+                <button id="pasteBtn" class="btn">
+                    <span>📋</span> 粘贴
+                </button>
+                <button id="copyBtn" class="btn">
+                    <span>📄</span> 复制
+                </button>
+                <button id="clearBtn" class="btn btn-danger">
+                    <span>🗑️</span> 清空
+                </button>
             </div>
         </div>
-        <div class="hint-text">单个文件最大支持 5GB</div>
 
-        <div id="progressContainer"></div>
+        <div class="card">
+            <h3>文件传输</h3>
 
-        <h3>当前文件列表:</h3>
-        <ul id="fileList">
-            {% for filename in initial_files %}
-            <li>
-                <a href="/uploads/{{ filename }}" target="_blank">{{ filename }}</a>
-            </li>
-            {% endfor %}
-        </ul>
+            <div class="upload-area">
+                <input type="file" id="fileInput" multiple />
+                <div class="upload-label">
+                    点击或拖拽文件至此 (支持批量上传)
+                </div>
+            </div>
+            <div class="hint-text">单个文件最大支持 5GB</div>
+
+            <div id="progressContainer"></div>
+
+            <h3>当前文件列表:</h3>
+            <ul id="fileList">
+                {% for filename in initial_files %}
+                <li data-filename="{{ filename }}">
+                    <a href="/uploads/{{ filename }}" target="_blank">{{ filename }}</a>
+                    <span class="delete-btn" onclick="deleteFile('{{ filename }}')" title="删除">🗑️</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
     </div>
-</div>
 
-<script>
-    const socket = io();
-    const textarea = document.getElementById("textInput");
-    const fileInput = document.getElementById("fileInput");
-    const fileList = document.getElementById("fileList");
-    const progressContainer = document.getElementById("progressContainer");
+    <script>
+        const socket = io();
+        const textarea = document.getElementById("textInput");
+        const pasteBtn = document.getElementById("pasteBtn");
+        const copyBtn = document.getElementById("copyBtn");
+        const clearBtn = document.getElementById("clearBtn");
+        const fileInput = document.getElementById("fileInput");
+        const uploadArea = document.querySelector(".upload-area");
+        const fileList = document.getElementById("fileList");
+        const progressContainer = document.getElementById("progressContainer");
 
-    // --- 文本同步 ---
-    textarea.addEventListener("input", () => {
-        socket.emit("send_text", { text: textarea.value });
-    });
-
-    socket.on("update_text", (data) => {
-        if (textarea.value !== data.text) {
-            textarea.value = data.text;
+        // --- 文本同步 ---
+        function sendText(text) {
+            socket.emit("send_text", { text: text });
         }
-    });
 
-    // --- 文件上传 ---
-    fileInput.addEventListener("change", () => {
-        const files = fileInput.files;
-        if (files.length === 0) return;
-
-        Array.from(files).forEach(file => {
-            uploadSingleFile(file);
+        textarea.addEventListener("input", () => {
+            sendText(textarea.value);
         });
-        
-        fileInput.value = ''; 
-    });
 
-    function uploadSingleFile(file) {
-        const progressItem = document.createElement("div");
-        progressItem.className = "progress-item";
-        
-        const progressBar = document.createElement("div");
-        progressBar.className = "progress-bar";
-        
-        const progressText = document.createElement("div");
-        progressText.className = "progress-text";
-        progressText.textContent = `准备上传: ${file.name}`;
-
-        progressItem.appendChild(progressBar);
-        progressItem.appendChild(progressText);
-        progressContainer.prepend(progressItem); 
-
-        const formData = new FormData();
-        formData.append("files", file); 
-
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/upload", true);
-
-        xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-                const percent = (event.loaded / event.total) * 100;
-                progressBar.style.width = percent + "%";
-                progressText.textContent = `上传中 ${file.name}: ${Math.round(percent)}%`;
+        // 粘贴功能
+        pasteBtn.addEventListener("click", async () => {
+            if (!navigator.clipboard || !navigator.clipboard.readText) {
+                alert("浏览器限制：局域网访问请使用 Ctrl+V 粘贴，或改用 localhost/HTTPS 访问。");
+                return;
             }
-        };
+            try {
+                const text = await navigator.clipboard.readText();
+                textarea.value = text;
+                sendText(text);
+            } catch (err) {
+                alert("未获得剪贴板权限，请在浏览器地址栏检查权限设置。");
+            }
+        });
 
-        xhr.onload = () => {
-            if (xhr.status === 200) {
-                try {
-                    const data = JSON.parse(xhr.responseText);
-                    if (data.success) {
-                        progressBar.style.backgroundColor = "#4caf50"; 
-                        progressText.textContent = `上传完成: ${file.name}`;
-                        setTimeout(() => progressItem.remove(), 2000);
-                    } else {
-                        progressText.textContent = `失败: ${data.message}`;
+        // 复制功能
+        copyBtn.addEventListener("click", async () => {
+            if (!textarea.value) return;
+            try {
+                await navigator.clipboard.writeText(textarea.value);
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = "<span>✅</span> 已复制";
+                setTimeout(() => copyBtn.innerHTML = originalText, 2000);
+            } catch (err) {
+                alert("复制失败，请手动选中后使用 Ctrl+C。");
+            }
+        });
+
+        // 清空功能
+        clearBtn.addEventListener("click", () => {
+            if (confirm("确定要清空所有设备上的文本吗？")) {
+                textarea.value = "";
+                sendText("");
+            }
+        });
+
+        socket.on("update_text", (data) => {
+            if (textarea.value !== data.text) {
+                textarea.value = data.text;
+            }
+        });
+
+        // --- 文件上传 ---
+        fileInput.addEventListener("change", () => {
+            const files = fileInput.files;
+            if (files.length === 0) return;
+
+            Array.from(files).forEach(file => {
+                uploadSingleFile(file);
+            });
+
+            fileInput.value = '';
+        });
+
+        function uploadSingleFile(file) {
+            const progressItem = document.createElement("div");
+            progressItem.className = "progress-item";
+
+            const progressBar = document.createElement("div");
+            progressBar.className = "progress-bar";
+
+            const progressText = document.createElement("div");
+            progressText.className = "progress-text";
+            progressText.textContent = `准备上传: ${file.name}`;
+
+            progressItem.appendChild(progressBar);
+            progressItem.appendChild(progressText);
+            progressContainer.prepend(progressItem);
+
+            const formData = new FormData();
+            formData.append("files", file);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/upload", true);
+
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const percent = (event.loaded / event.total) * 100;
+                    progressBar.style.width = percent + "%";
+                    progressText.textContent = `上传中 ${file.name}: ${Math.round(percent)}%`;
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        if (data.success) {
+                            progressBar.style.backgroundColor = "#4caf50";
+                            progressText.textContent = `上传完成: ${file.name}`;
+                            setTimeout(() => progressItem.remove(), 2000);
+                        } else {
+                            progressText.textContent = `失败: ${data.message}`;
+                            progressBar.style.backgroundColor = "#f44336";
+                        }
+                    } catch (e) {
+                        progressText.textContent = `解析错误`;
                         progressBar.style.backgroundColor = "#f44336";
                     }
-                } catch (e) {
-                    progressText.textContent = `解析错误`;
+                } else if (xhr.status === 413) {
+                    progressText.textContent = `文件过大 (超过50GB)`;
+                    progressBar.style.backgroundColor = "#f44336";
+                } else {
+                    progressText.textContent = `服务器错误: ${xhr.status}`;
                     progressBar.style.backgroundColor = "#f44336";
                 }
-            } else if (xhr.status === 413) {
-                progressText.textContent = `文件过大 (超过50GB)`;
-                progressBar.style.backgroundColor = "#f44336";
-            } else {
-                progressText.textContent = `服务器错误: ${xhr.status}`;
-                progressBar.style.backgroundColor = "#f44336";
-            }
-        };
+            };
 
         xhr.onerror = () => {
             progressText.textContent = `网络错误`;
@@ -287,27 +406,79 @@
         xhr.send(formData);
     }
 
-    // --- 新文件通知 ---
-    socket.on("new_file", (data) => {
-        addFileToList(data.filename);
+    // --- 拖拽效果 ---
+    ['dragenter', 'dragover'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.add('drag-over');
+        }, false);
     });
 
-    function addFileToList(filename) {
-        const existingLinks = fileList.querySelectorAll('a');
-        for (let link of existingLinks) {
-            if (link.textContent === filename) return;
+    ['dragleave', 'drop'].forEach(eventName => {
+        uploadArea.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('drag-over');
+        }, false);
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+            Array.from(files).forEach(file => uploadSingleFile(file));
+        }
+    }, false);
+
+    async function deleteFile(filename) {
+        if (!confirm(`确定要删除文件 "${filename}" 吗？`)) return;
+        try {
+            const response = await fetch(`/delete/${filename}`, { method: "DELETE" });
+            const data = await response.json();
+            if (!data.success) alert(data.message);
+        } catch (err) {
+            alert("删除失败，请稍后重试。");
+        }
+    }
+
+        // --- 新文件及删除通知 ---
+        socket.on("new_file", (data) => {
+            addFileToList(data.filename);
+        });
+
+        socket.on("file_deleted", (data) => {
+            removeFileFromList(data.filename);
+        });
+
+        function addFileToList(filename) {
+            const existingItem = fileList.querySelector(`li[data-filename="${filename}"]`);
+            if (existingItem) return;
+
+            const li = document.createElement("li");
+            li.setAttribute("data-filename", filename);
+
+            const aView = document.createElement("a");
+            aView.href = `/uploads/${filename}`;
+            aView.textContent = filename;
+            aView.target = "_blank";
+
+            const delSpan = document.createElement("span");
+            delSpan.className = "delete-btn";
+            delSpan.innerHTML = "🗑️";
+            delSpan.title = "删除";
+            delSpan.onclick = () => deleteFile(filename);
+
+            li.appendChild(aView);
+            li.appendChild(delSpan);
+            fileList.insertBefore(li, fileList.firstChild);
         }
 
-        const li = document.createElement("li");
-        
-        const aView = document.createElement("a");
-        aView.href = `/uploads/${filename}`;
-        aView.textContent = filename;
-        aView.target = "_blank";
-
-        li.appendChild(aView);
-        fileList.insertBefore(li, fileList.firstChild);
-    }
-</script>
+        function removeFileFromList(filename) {
+            const item = fileList.querySelector(`li[data-filename="${filename}"]`);
+            if (item) item.remove();
+        }
+    </script>
 </body>
+
 </html>

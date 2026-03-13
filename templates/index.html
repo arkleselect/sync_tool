@@ -166,10 +166,6 @@
             text-decoration: underline;
         }
 
-        #fileList li:hover {
-            background-color: #f9f9f9;
-        }
-
         .button-group {
             margin-bottom: 15px;
             display: flex;
@@ -207,7 +203,7 @@
             color: #ff4d4f;
             cursor: pointer;
             padding: 5px 10px;
-            font-size: 18px;
+            font-size: 14px;
             border-radius: 4px;
             transition: background 0.2s;
             margin-left: 10px;
@@ -223,6 +219,74 @@
             border-color: var(--primary-color);
             border-style: solid;
         }
+
+        /* 自定义弹窗样式 */
+        #customModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(2px);
+        }
+
+        .modal-content {
+            background: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .modal-message {
+            margin-bottom: 25px;
+            font-size: 16px;
+            color: #444;
+            line-height: 1.5;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .modal-btn {
+            padding: 10px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            border: 1px solid #ddd;
+            transition: all 0.2s;
+        }
+
+        .modal-btn-confirm {
+            background: #ff4d4f;
+            color: #fff;
+            border-color: #ff4d4f;
+        }
+
+        .modal-btn-confirm:hover {
+            background: #ff7875;
+            border-color: #ff7875;
+        }
+
+        .modal-btn-cancel {
+            background: #f5f5f5;
+            color: #666;
+        }
+
+        .modal-btn-cancel:hover {
+            background: #e8e8e8;
+        }
     </style>
 </head>
 
@@ -233,14 +297,8 @@
             <h3>文本同步</h3>
             <textarea id="textInput" placeholder="在此输入文本，将自动同步到所有设备...">{{ initial_text }}</textarea>
             <div class="button-group">
-                <button id="pasteBtn" class="btn">
-                    <span>📋</span> 粘贴
-                </button>
-                <button id="copyBtn" class="btn">
-                    <span>📄</span> 复制
-                </button>
                 <button id="clearBtn" class="btn btn-danger">
-                    <span>🗑️</span> 清空
+                    清空
                 </button>
             </div>
         </div>
@@ -263,18 +321,24 @@
                 {% for filename in initial_files %}
                 <li data-filename="{{ filename }}">
                     <a href="/uploads/{{ filename }}" target="_blank">{{ filename }}</a>
-                    <span class="delete-btn" onclick="deleteFile('{{ filename }}')" title="删除">🗑️</span>
+                    <span class="delete-btn" onclick="deleteFile('{{ filename }}')" title="删除">删除</span>
                 </li>
                 {% endfor %}
             </ul>
+        </div>
+    <div id="customModal">
+        <div class="modal-content">
+            <div class="modal-message" id="modalMessage">确定要执行此操作吗？</div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-cancel" id="modalCancel">取消</button>
+                <button class="modal-btn modal-btn-confirm" id="modalConfirm">确定</button>
+            </div>
         </div>
     </div>
 
     <script>
         const socket = io();
         const textarea = document.getElementById("textInput");
-        const pasteBtn = document.getElementById("pasteBtn");
-        const copyBtn = document.getElementById("copyBtn");
         const clearBtn = document.getElementById("clearBtn");
         const fileInput = document.getElementById("fileInput");
         const uploadArea = document.querySelector(".upload-area");
@@ -290,40 +354,10 @@
             sendText(textarea.value);
         });
 
-        // 粘贴功能
-        pasteBtn.addEventListener("click", async () => {
-            if (!navigator.clipboard || !navigator.clipboard.readText) {
-                alert("浏览器限制：局域网访问请使用 Ctrl+V 粘贴，或改用 localhost/HTTPS 访问。");
-                return;
-            }
-            try {
-                const text = await navigator.clipboard.readText();
-                textarea.value = text;
-                sendText(text);
-            } catch (err) {
-                alert("未获得剪贴板权限，请在浏览器地址栏检查权限设置。");
-            }
-        });
-
-        // 复制功能
-        copyBtn.addEventListener("click", async () => {
-            if (!textarea.value) return;
-            try {
-                await navigator.clipboard.writeText(textarea.value);
-                const originalText = copyBtn.innerHTML;
-                copyBtn.innerHTML = "<span>✅</span> 已复制";
-                setTimeout(() => copyBtn.innerHTML = originalText, 2000);
-            } catch (err) {
-                alert("复制失败，请手动选中后使用 Ctrl+C。");
-            }
-        });
-
         // 清空功能
         clearBtn.addEventListener("click", () => {
-            if (confirm("确定要清空所有设备上的文本吗？")) {
-                textarea.value = "";
-                sendText("");
-            }
+            textarea.value = "";
+            sendText("");
         });
 
         socket.on("update_text", (data) => {
@@ -398,49 +432,73 @@
                 }
             };
 
-        xhr.onerror = () => {
-            progressText.textContent = `网络错误`;
-            progressBar.style.backgroundColor = "#f44336";
-        };
+            xhr.onerror = () => {
+                progressText.textContent = `网络错误`;
+                progressBar.style.backgroundColor = "#f44336";
+            };
 
-        xhr.send(formData);
-    }
-
-    // --- 拖拽效果 ---
-    ['dragenter', 'dragover'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            uploadArea.classList.add('drag-over');
-        }, false);
-    });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            uploadArea.classList.remove('drag-over');
-        }, false);
-    });
-
-    uploadArea.addEventListener('drop', (e) => {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        if (files.length > 0) {
-            Array.from(files).forEach(file => uploadSingleFile(file));
+            xhr.send(formData);
         }
-    }, false);
 
-    async function deleteFile(filename) {
-        if (!confirm(`确定要删除文件 "${filename}" 吗？`)) return;
-        try {
-            const response = await fetch(`/delete/${filename}`, { method: "DELETE" });
-            const data = await response.json();
-            if (!data.success) alert(data.message);
-        } catch (err) {
-            alert("删除失败，请稍后重试。");
+        // --- 拖拽效果 ---
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                uploadArea.classList.add('drag-over');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                uploadArea.classList.remove('drag-over');
+            }, false);
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                Array.from(files).forEach(file => uploadSingleFile(file));
+            }
+        }, false);
+
+        // 自定义确认弹窗逻辑
+        function showConfirm(message, onConfirm) {
+            const modal = document.getElementById("customModal");
+            const msgEl = document.getElementById("modalMessage");
+            const confirmBtn = document.getElementById("modalConfirm");
+            const cancelBtn = document.getElementById("modalCancel");
+
+            msgEl.textContent = message;
+            modal.style.display = "flex";
+
+            const cleanup = () => {
+                modal.style.display = "none";
+                confirmBtn.onclick = null;
+                cancelBtn.onclick = null;
+            };
+
+            confirmBtn.onclick = () => {
+                cleanup();
+                onConfirm();
+            };
+            cancelBtn.onclick = cleanup;
         }
-    }
+
+        async function deleteFile(filename) {
+            showConfirm(`确定要永久删除文件 "${filename}" 吗？`, async () => {
+                try {
+                    const response = await fetch(`/delete/${filename}`, { method: "DELETE" });
+                    const data = await response.json();
+                    if (!data.success) alert(data.message);
+                } catch (err) {
+                    alert("删除失败，请稍后重试。");
+                }
+            });
+        }
 
         // --- 新文件及删除通知 ---
         socket.on("new_file", (data) => {
@@ -465,7 +523,7 @@
 
             const delSpan = document.createElement("span");
             delSpan.className = "delete-btn";
-            delSpan.innerHTML = "🗑️";
+            delSpan.innerHTML = "删除";
             delSpan.title = "删除";
             delSpan.onclick = () => deleteFile(filename);
 
